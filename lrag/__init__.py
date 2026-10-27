@@ -8,4 +8,5 @@
     rerank.py        Step 3b, rerank: a cross-encoder sorts the vector search candidates again and keeps the best.
     llm.py           Step 4, generation: builds the prompt and streams the answer from Gemini.
     pipeline.py      Connects the steps: build_index(), search(), ask().
+    evaluate.py      Measures retrieval (hit@k) with eval/questions.json, with and without rerank.
 """

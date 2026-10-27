@@ -16,3 +16,5 @@ TOP_K = 3  # The number of chunks to put in the prompt.
 RERANK_MODEL = os.getenv("RERANK_MODEL", "Qwen/Qwen3-Reranker-0.6B")
 RERANK = os.getenv("RERANK", "1") != "0"  # RERANK=0 turns off rerank. Search then uses only the vector order.
 CANDIDATES = 20  # With rerank: the vector search gets this many chunks. The reranker keeps the best TOP_K.
+
+EVAL_FILE = ROOT / "eval" / "questions.json"  # Questions with the correct chunk. `rag.py eval` uses them.
