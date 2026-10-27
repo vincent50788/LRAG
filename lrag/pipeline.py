@@ -1,11 +1,11 @@
 """Connects the steps into the RAG flow.
 
 Offline (index)  data/*.md ─split─▶ chunks ─embed─▶ chroma_db/
-Online (ask)     question ─embed─▶ top k chunks ─add to prompt─▶ LLM ─▶ answer
+Online (ask)     question ─embed─▶ top 20 chunks ─rerank─▶ top k chunks ─add to prompt─▶ LLM ─▶ answer
 """
-from . import llm, vector_store
+from . import llm, rerank, vector_store
 from .chunking import load_chunks
-from .config import CHROMA_DIR, DATA_DIR, TOP_K
+from .config import CANDIDATES, CHROMA_DIR, DATA_DIR, RERANK, TOP_K
 from .timing import tick
 
 
@@ -18,9 +18,16 @@ def build_index():
 
 
 def search(question, k=TOP_K):
-    """Return the k most similar chunks: [(similarity, chunk), ...], highest first."""
-    hits = vector_store.search(question, k)
-    tick(f"Search the top {k} chunks (includes index load and question embedding)")
+    """Return the k best chunks: [(score, chunk), ...], highest first.
+    With rerank, the score is the reranker score. Without rerank, it is the cosine similarity."""
+    if not RERANK:
+        hits = vector_store.search(question, k)
+        tick(f"Search the top {k} chunks (includes index load and question embedding)")
+        return hits
+    hits = vector_store.search(question, CANDIDATES)
+    tick(f"Search the top {CANDIDATES} candidates (includes index load and question embedding)")
+    hits = rerank.rerank(question, hits, k)
+    tick(f"Rerank the {CANDIDATES} candidates and keep the top {k} (includes reranker load)")
     return hits
 
 
