@@ -2,7 +2,7 @@
 
 - **Search** runs on this computer: [sentence-transformers](https://sbert.net) with `Qwen/Qwen3-Embedding-0.6B`, then `Qwen/Qwen3-Reranker-0.6B` sorts the results again. The handbook does not leave the computer.
 - **Generation** runs in the cloud: the Gemini API free tier. The system sends only the question and the top 3 chunks.
-  (⚠️ Google can use free-tier content to improve its products. For real company documents, use a paid tier or a local model.)
+  (Google can use free-tier content to improve its products. For real company documents, use a paid tier or a local model.)
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -26,14 +26,14 @@ Offline (index)  data/*.md ─split─▶ chunks ─embed─▶ vectors ─▶ c
 Online (ask)     question ─embed─▶ vector ─cosine similarity─▶ top 20 chunks ─rerank─▶ top 3 chunks ─add to prompt─▶ LLM ─▶ answer
 ```
 
-| Step         | Location                            | Key points                                                                                                                                                                |
-| ------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chunking     | `lrag/chunking.py` `split()`        | Splits the text at each `##` heading. If a chunk is too large, unrelated text dilutes its vector. If a chunk is too small, it loses its context.                          |
-| Embedding    | `lrag/embedding.py` `Qwen3EF`       | Sentences with a similar meaning get vectors with a similar direction. Use the **same** model for questions and chunks. If you change the model, run `index` again. Qwen3 needs the `query` prompt for questions, not for chunks. |
-| Retrieval    | `lrag/vector_store.py` `search()`   | Sorts the chunks by cosine similarity and takes the top 20 candidates. See the Chroma section below.                                                                      |
-| Rerank       | `lrag/rerank.py` `rerank()`         | A cross-encoder reads the question and each candidate together, and keeps the best 3. More accurate than vectors, but slower. See the Rerank section below. `RERANK=0` turns it off. |
-| Augmentation | `lrag/llm.py` `SYSTEM_PROMPT`       | Gives the model three rules: use only the reference material, give the source, and say "I do not know" when the answer is missing. These rules reduce hallucination. |
-| Generation   | `lrag/llm.py` `generate()`          | Calls the Gemini API and prints the answer as a stream. Retrieval and generation can use models from different vendors.                                                    |
+| Step         | Location                          | Key points                                                                                                                                                                                                                        |
+| ------------ | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chunking     | `lrag/chunking.py` `split()`      | Splits the text at each `##` heading. If a chunk is too large, unrelated text dilutes its vector. If a chunk is too small, it loses its context.                                                                                  |
+| Embedding    | `lrag/embedding.py` `Qwen3EF`     | Sentences with a similar meaning get vectors with a similar direction. Use the **same** model for questions and chunks. If you change the model, run `index` again. Qwen3 needs the `query` prompt for questions, not for chunks. |
+| Retrieval    | `lrag/vector_store.py` `search()` | Sorts the chunks by cosine similarity and takes the top 20 candidates. See the Chroma section below.                                                                                                                              |
+| Rerank       | `lrag/rerank.py` `rerank()`       | A cross-encoder reads the question and each candidate together, and keeps the best 3. More accurate than vectors, but slower. See the Rerank section below. `RERANK=0` turns it off.                                              |
+| Augmentation | `lrag/llm.py` `SYSTEM_PROMPT`     | Gives the model three rules: use only the reference material, give the source, and say "I do not know" when the answer is missing. These rules reduce hallucination.                                                              |
+| Generation   | `lrag/llm.py` `generate()`        | Calls the Gemini API and prints the answer as a stream. Retrieval and generation can use models from different vendors.                                                                                                           |
 
 ## Project structure
 
