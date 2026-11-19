@@ -9,9 +9,10 @@ export GEMINI_API_KEY=...                # Get a free key at aistudio.google.com
 .venv/bin/python rag.py index            # The first run downloads the embedding model (about 1.1 GB).
 .venv/bin/python rag.py ask "What do I do if I forget to clock in?"   # The first run downloads the reranker (about 1.2 GB).
 .venv/bin/python rag.py eval             # Measure retrieval with and without rerank.
+brew install tesseract && .venv/bin/python rag.py ocr   # Optional: read the sample scan in scans/ with OCR. It writes data/*.md. Then run index again.
 ```
 
-The 12 documents in `data/` (127 chunks) are for a fictional company, Starriver Tech. The models go to the Hugging Face cache, `~/.cache/huggingface/hub/`, not to this folder.
+The 12 documents in `data/` (127 chunks) are for a fictional company, Starriver Tech. A 13th document, `starriver-tech-overseas-travel-guide.md` (4 chunks), is OCR output from a scan: see "OCR input" below. The models go to the Hugging Face cache, `~/.cache/huggingface/hub/`, not to this folder.
 
 ## What RAG does
 
@@ -20,6 +21,7 @@ An LLM did not see your company handbook during training. RAG (Retrieval-Augment
 A **chunk** is one part of a document. The system stores, finds, and sends each chunk as one unit.
 
 ```
+Offline (ocr)    scans/*.pdf, *.png ─OCR─▶ data/*.md   (optional: only for scans and images)
 Offline (index)  data/*.md ─split─▶ chunks ─embed─▶ vectors ─▶ chroma_db/
 Online (ask)     question ─embed─▶ vector ─cosine similarity─▶ top 20 chunks ─rerank─▶ top 3 chunks ─add to prompt─▶ LLM ─▶ answer
 ```
@@ -36,10 +38,11 @@ Online (ask)     question ─embed─▶ vector ─cosine similarity─▶ top 2
 ## Project structure
 
 ```
-rag.py              Command-line entry point: index / search / ask / eval
+rag.py              Command-line entry point: index / search / ask / eval / ocr
 lrag/
   config.py         Settings: paths, model names, Top-K, rerank (environment variables can override the models)
   timing.py         tick(): prints the time of each step
+  ocr.py            Step 0: OCR. Reads scans/ with Tesseract and writes data/*.md (not a RAG step)
   chunking.py       Step 1: chunking
   embedding.py      Step 2: embedding (Qwen3EF)
   vector_store.py   Step 3: Chroma index and search
@@ -48,6 +51,7 @@ lrag/
   pipeline.py       Connects steps 1–4 into build_index() / search() / ask()
   evaluate.py       `rag.py eval`: hit@1 and hit@3, with and without rerank
 data/               The documents to search (*.md)
+scans/              Scanned PDFs and images for OCR (the sample and the script that makes it)
 eval/questions.json Test questions and the correct chunk for each one
 chroma_db/          The vector index (`rag.py index` makes it, git ignores it)
 ```
@@ -92,8 +96,53 @@ Vector + rerank | 48/54 | 54/54 | +2.1 s
 
 Rerank finds the correct chunk in the top 3 for all questions. But it also moves some correct chunks down from position 1, so hit@1 does not change. A test set of 54 questions is small. A difference of 1 or 2 questions can be chance. With only 2 documents (11 chunks), rerank was not useful: 20 candidates were all the chunks, and all chunks fit in the prompt.
 
+## OCR input (`lrag/ocr.py`)
+
+OCR (Optical Character Recognition) reads the text in a picture. It is not a RAG step. It runs **before** chunking, it only makes text, and it changes nothing else in the pipeline.
+
+```
+scans/*.pdf, *.png, *.webp ─Tesseract─▶ data/<name>.md ─▶ index ─▶ ask   (index and ask work as before)
+```
+
+- Tesseract is a program, not a Python package. Install it with `brew install tesseract`. It reads English by default. For another language, install its data (`brew install tesseract-lang`) and set `OCR_LANG`, for example `OCR_LANG=eng+chi_tra`.
+- `rag.py ocr [file-or-folder]` reads one file or a folder (default: `scans/`). A PDF page that has a text layer is copied, because OCR would only add errors. A page with no text layer is drawn as a picture and read by OCR. An image (PNG, JPG, WebP, TIFF) always goes to OCR.
+- OCR text has no headings, but the chunker needs `##` headings. So the loader writes one `## Page N` for each page, and each page becomes one chunk. The page number also gives each answer a source: "Overseas Travel Guide > Page 2".
+- The output is a normal file in `data/`. Open it and look for OCR mistakes (the sample has one: "lf" instead of "If"). You can fix them by hand. The comment at the top records the source file and the settings. OCR is a separate command on purpose: you can check the text before it goes into the index, and `index` does not run OCR again each time.
+- A page is a coarse chunk. If your pages are dense, try to split each page into paragraphs and compare the `eval` results.
+- The sample is `scans/starriver-tech-overseas-travel-guide.pdf`: 4 pages, no text layer, a small tilt, blur, and noise. `scans/make_sample_scan.py` makes it, and the text in that script is the right answer for OCR. The guide gives the overseas limits that the handbook only mentions ("Different limits apply to overseas regions").
+- Run the 10 questions about the guide with `rag.py eval eval/ocr_questions.json`. The correct chunks in that file use the headings that the loader writes (`... > Page 2`), not text that OCR read. If the key were OCR text, an OCR mistake in it would look like a retrieval miss.
+
+Results (10 questions, 131 chunks, PDF read at 300 DPI):
+
+| Method          | hit@1 | hit@3 |
+| --------------- | ----- | ----- |
+| Vector only     | 8/10  | 10/10 |
+| Vector + rerank | 10/10 | 10/10 |
+
+The 54 handbook questions give the same results as before, with the 4 new chunks in the index.
+
+### Experiment: make the OCR worse
+
+`OCR_DPI` is the resolution that `rag.py ocr` uses to draw a scanned PDF page (default 300). Lower it, run `rag.py ocr`, then `index`, then `eval eval/ocr_questions.json`. At the end, run `rag.py ocr` again without `OCR_DPI` to restore the text.
+
+| OCR_DPI | Text compared with the 300 DPI text | Vector only (hit@1, hit@3) | Vector + rerank (hit@1, hit@3) |
+| ------- | ----------------------------------- | -------------------------- | ------------------------------ |
+| 300     | the reference                       | 8/10, 10/10                | 10/10, 10/10                   |
+| 100     | 99.8% the same                      | 8/10, 10/10                | 10/10, 10/10                   |
+| 72      | 97.7% the same                      | 9/10, 10/10                | 10/10, 10/10                   |
+| 50      | 47.1% the same                      | 7/10, 10/10                | 8/10, 10/10                    |
+| 36      | 10.7% the same                      | 4/10, 9/10                 | 2/10, 6/10                     |
+
+("The same" is the `difflib` ratio between the two OCR texts. It is not an accuracy against the original text.)
+
+- At 72 DPI, the text has visible mistakes ("Startiver", "approvesit"), but retrieval does not get worse. The embedding encodes the meaning of the whole chunk, so a few wrong letters change the vector very little. hit@1 even goes from 8/10 to 9/10. With 10 questions, treat that as chance.
+- At 50 DPI, about half of the text is different, and the correct page is still in the top 3 for all 10 questions.
+- Retrieval breaks only at 36 DPI, when almost all of the text is lost. Then the reranker is **worse** than the vector search (6/10 against 9/10 at hit@3). A reranker that is better on clean text can be worse on garbage. With 10 questions, this is a hint, not a proof.
+- hit@k checks only that the right page is found. It does not check that the numbers on it are right. If OCR changes "NT$4,500" to "NT$4,800", retrieval still works, but the answer is wrong. When numbers matter, compare the answer with the scan.
+
 ## Not included on purpose (possible later additions)
 
 - Hybrid search (BM25 keywords and vectors): vector search often fails on proper nouns and ID numbers.
-- PDF and Word parsing, multi-turn conversation, a web UI.
+- Word and other file types (the OCR step reads only PDFs and images), multi-turn conversation, a web UI.
+- Layout-aware OCR: Tesseract reads tables and multiple columns in the wrong order. If your scans have them, a tool such as [Docling](https://docling.ai) is the next step.
 - A local LLM for generation (for example, `ollama pull qwen3:8b`): generation also runs offline, and no data leaves the company.

@@ -1,3 +1,7 @@
 google-genai
 sentence-transformers
 chromadb
+# The OCR step (optional). It also needs the Tesseract program: brew install tesseract
+pytesseract
+pypdfium2
+pillow

@@ -2,6 +2,7 @@
 
     config.py        Settings: paths, model names, Top-K.
     timing.py        Timing: tick() prints the time of each step.
+    ocr.py           Step 0, OCR: reads scans/ (PDFs and images) with Tesseract and writes data/*.md. Not a RAG step.
     chunking.py      Step 1, chunking: reads data/*.md and splits the text at each `##` heading.
     embedding.py     Step 2, embedding: Qwen3-Embedding encodes chunks and questions in different ways.
     vector_store.py  Step 3, storage: the Chroma vector store. build() makes the index. search() finds chunks.

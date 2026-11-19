@@ -6,7 +6,7 @@ If a chunk is too large, unrelated text dilutes its vector. If a chunk is too sm
 import re
 
 
-def split(text, source):
+def split_document(text, source):
     """Split the text at each `##` heading. Add "document > section" to the start of each chunk.
     This prefix gives the vector the context of the chunk."""
     title = text.splitlines()[0].lstrip("# ").strip()
@@ -17,7 +17,6 @@ def split(text, source):
     # ponytail: Each section becomes one chunk. If sections are long, use fixed-length chunks with overlap.
     return chunks
 
-
 def load_chunks(data_dir):
     """Read all .md files in the folder and split them into chunks: [{"source", "text"}, ...]."""
-    return [c for f in sorted(data_dir.glob("*.md")) for c in split(f.read_text(), f.name)]
+    return [c for f in sorted(data_dir.glob("*.md")) for c in split_document(f.read_text(), f.name)]

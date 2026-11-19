@@ -4,7 +4,8 @@ sentence-transformers makes the embeddings on this computer. The Gemini API gene
     python rag.py index                # Offline step: read the documents, split, embed, and store the chunks.
     python rag.py search "question"    # Search only. Shows the chunks that the search finds. Does not call the LLM.
     python rag.py ask "question"       # Full RAG: search, build the prompt, and generate the answer with Gemini.
-    python rag.py eval                 # Measure retrieval with eval/questions.json: vector only, and vector + rerank.
+    python rag.py eval [file.json]     # Measure retrieval with eval/questions.json (or another file): vector only, and vector + rerank.
+    python rag.py ocr [file-or-folder] # Read scanned PDFs and images (default folder: scans/) with Tesseract. Writes data/<name>.md.
 
 Embedding runs on this computer with Qwen3-Embedding from Hugging Face.
 Generation uses the Gemini API (free tier). Only the top chunks go to the cloud.
@@ -28,7 +29,11 @@ def main():
     elif cmd == "ask" and rest:
         pipeline.ask(rest[0])
     elif cmd == "eval":
-        evaluate.run()
+        evaluate.run(*rest[:1])  # Optional: a different questions file.
+    elif cmd == "ocr":
+        from lrag import ocr  # Load it here, not at the top. The OCR packages are optional for the other commands.
+
+        ocr.run(*rest[:1])  # Optional: one file or one folder. The default folder is scans/.
     else:
         print(__doc__)
 

@@ -1,6 +1,6 @@
 """Measure retrieval: does the correct chunk come back? Compare the vector order with the rerank order.
 
-eval/questions.json has questions and the correct chunk for each one ("document > section").
+eval/questions.json (or another file that you give) has questions and the correct chunk for each one ("document > section").
 For each question, one vector search gets CANDIDATES chunks:
 - Vector only: the order of the vector search.
 - Vector + rerank: the reranker sorts the same candidates again.
@@ -8,6 +8,7 @@ hit@k = the number of questions with the correct chunk in the top k. Only the to
 """
 import json
 import time
+from pathlib import Path
 
 from . import rerank, vector_store
 from .config import CANDIDATES, EVAL_FILE, TOP_K
@@ -19,8 +20,8 @@ def _rank(expected, hits):
     return heads.index(expected) + 1 if expected in heads else None
 
 
-def run():
-    questions = json.loads(EVAL_FILE.read_text())
+def run(path=EVAL_FILE):
+    questions = json.loads(Path(path).read_text())
     rows, rerank_time = [], 0.0
     for item in questions:
         hits = vector_store.search(item["q"], CANDIDATES)
