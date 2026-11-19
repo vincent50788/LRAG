@@ -12,7 +12,51 @@ export GEMINI_API_KEY=...                # Get a free key at aistudio.google.com
 brew install tesseract && .venv/bin/python rag.py ocr   # Optional: read the sample scan in scans/ with OCR. It writes data/*.md. Then run index again.
 ```
 
-The 12 documents in `data/` (127 chunks) are for a fictional company, Starriver Tech. A 13th document, `starriver-tech-overseas-travel-guide.md` (4 chunks), is OCR output from a scan: see "OCR input" below. The models go to the Hugging Face cache, `~/.cache/huggingface/hub/`, not to this folder.
+The 14 handbook documents in `data/` (127 chunks) are for a fictional company, Starriver Tech. Three more files in `data/` (6 chunks) are OCR output from the files in `scans/`: see "OCR input" below. The models go to the Hugging Face cache, `~/.cache/huggingface/hub/`, not to this folder.
+
+## Requirements
+
+- Python 3 with `venv`. The code was run on Python 3.14, on Apple Silicon.
+- About 2.5 GB of disk space for the two local models (1.1 GB for the embedding model, 1.2 GB for the reranker). Both download on first use.
+- A Gemini API key, only for `ask`. `index`, `search`, `eval`, and `ocr` do not call the cloud.
+- Tesseract, only for `ocr`: `brew install tesseract` on macOS. The Python packages for OCR (`pytesseract`, `pypdfium2`, `pillow`) are in `requirements.txt`, but the code loads them only when `ocr` runs.
+
+## Commands
+
+| Command                       | What it does                                                                                                                  | Needs the key? |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `rag.py index`                | Reads `data/*.md`, splits, embeds, and stores the chunks in `chroma_db/`. It deletes the old index and builds a new one.      | No             |
+| `rag.py search "question"`    | Shows the top 3 chunks and their scores. Does not call the LLM.                                                               | No             |
+| `rag.py ask "question"`       | Full RAG: search, rerank, build the prompt, and stream the answer from Gemini.                                                | Yes            |
+| `rag.py eval [file.json]`     | Measures hit@1 and hit@3, with and without rerank. The default file is `eval/questions.json`.                                 | No             |
+| `rag.py ocr [file-or-folder]` | Reads scanned PDFs and images (default folder: `scans/`) with Tesseract and writes `data/<name>.md`. Run `index` after it.    | No             |
+
+Any other input prints the help text.
+
+## Configuration
+
+All settings are in `lrag/config.py`. These can be changed with environment variables:
+
+| Variable         | Default                     | Meaning                                                                                 |
+| ---------------- | --------------------------- | --------------------------------------------------------------------------------------- |
+| `GEMINI_API_KEY` | (none)                      | The key for the Gemini API. Only `ask` needs it.                                        |
+| `EMBED_MODEL`    | `Qwen/Qwen3-Embedding-0.6B` | The embedding model. If you change it, run `index` again.                               |
+| `RERANK_MODEL`   | `Qwen/Qwen3-Reranker-0.6B`  | The reranker model.                                                                     |
+| `RERANK`         | `1`                         | `RERANK=0` turns off rerank. Search then uses only the vector order.                    |
+| `CHAT_MODEL`     | `gemini-flash-latest`       | The Gemini model for the answer. If it fails, the code tries `gemini-flash-lite-latest`. |
+| `OCR_LANG`       | `eng`                       | The Tesseract language. Join several with `+`, for example `eng+chi_tra`.               |
+| `OCR_DPI`        | `300`                       | The resolution to draw a scanned PDF page before OCR.                                   |
+
+`TOP_K` (3 chunks in the prompt) and `CANDIDATES` (20 chunks from the vector search) are constants in `lrag/config.py`, not environment variables.
+
+## Privacy: what leaves the computer
+
+| Step                                                  | Where it runs      | What is sent out                                  |
+| ----------------------------------------------------- | ------------------ | ------------------------------------------------- |
+| OCR, chunking, embedding, vector search, rerank, eval | This computer      | Nothing                                           |
+| `ask`: generation                                     | Gemini API (cloud) | The question and the top 3 chunks, in one prompt. |
+
+The full documents and the index never leave the computer. The first run of each model downloads it from Hugging Face. After that, everything except `ask` works offline.
 
 ## What RAG does
 
@@ -50,11 +94,30 @@ lrag/
   llm.py            Step 4: prompt and Gemini generation
   pipeline.py       Connects steps 1–4 into build_index() / search() / ask()
   evaluate.py       `rag.py eval`: hit@1 and hit@3, with and without rerank
-data/               The documents to search (*.md)
-scans/              Scanned PDFs and images for OCR (the sample and the script that makes it)
-eval/questions.json Test questions and the correct chunk for each one
+data/               The documents to search (*.md): 14 handbook files, and the OCR output of scans/
+scans/              Inputs for OCR: the sample PDF and its script (make_sample_scan.py), and two sample images
+eval/
+  questions.json    54 test questions about the handbook, with the correct chunk for each one
+  ocr_questions.json  11 test questions about the OCR files (10 about the travel guide, 1 about the image)
 chroma_db/          The vector index (`rag.py index` makes it, git ignores it)
+requirements.txt    google-genai, sentence-transformers, chromadb, and the optional OCR packages
 ```
+
+### Data flow in code
+
+`rag.py index` → `pipeline.build_index()` → `chunking.load_chunks()` → `vector_store.build()` (the `Qwen3EF` embedding function makes the vectors).
+`rag.py ask` → `pipeline.ask()` → `vector_store.search()` (20 candidates) → `rerank.rerank()` (best 3) → `llm.generate()`.
+`rag.py eval` calls `vector_store.search()` and `rerank.rerank()` directly, and it does not call the LLM.
+
+### Test set format
+
+`eval/*.json` is a list of questions. `expected` is the first line of the correct chunk: "document title > section heading".
+
+```json
+[{"q": "When does my salary arrive each month?", "expected": "Starriver Tech Compensation and Payroll Policy > Pay Day"}]
+```
+
+A question counts as a hit@k when its `expected` chunk is in the first k results. If you rename a heading in `data/`, update the `expected` text too.
 
 ## Experiments
 
@@ -88,11 +151,10 @@ Interface: `build(chunks)` stores the chunks. `search(q, k)` returns the top k a
 
 Results with `rag.py eval` (54 questions, 127 chunks, Apple Silicon):
 
-                | hit@1 | hit@3 | Time for each question
-
---------------- | ----- | ----- | ----------------------
-Vector only | 48/54 | 52/54 | --
-Vector + rerank | 48/54 | 54/54 | +2.1 s
+| Method          | hit@1 | hit@3 | Time for each question |
+| --------------- | ----- | ----- | ---------------------- |
+| Vector only     | 48/54 | 52/54 | --                     |
+| Vector + rerank | 48/54 | 54/54 | +2.1 s                 |
 
 Rerank finds the correct chunk in the top 3 for all questions. But it also moves some correct chunks down from position 1, so hit@1 does not change. A test set of 54 questions is small. A difference of 1 or 2 questions can be chance. With only 2 documents (11 chunks), rerank was not useful: 20 candidates were all the chunks, and all chunks fit in the prompt.
 
@@ -112,7 +174,18 @@ scans/*.pdf, *.png, *.webp ─Tesseract─▶ data/<name>.md ─▶ index ─▶
 - The sample is `scans/starriver-tech-overseas-travel-guide.pdf`: 4 pages, no text layer, a small tilt, blur, and noise. `scans/make_sample_scan.py` makes it, and the text in that script is the right answer for OCR. The guide gives the overseas limits that the handbook only mentions ("Different limits apply to overseas regions").
 - Run the 10 questions about the guide with `rag.py eval eval/ocr_questions.json`. The correct chunks in that file use the headings that the loader writes (`... > Page 2`), not text that OCR read. If the key were OCR text, an OCR mistake in it would look like a retrieval miss.
 
-Results (10 questions, 131 chunks, PDF read at 300 DPI):
+### Two sample images
+
+`scans/` also has two images that are not part of the Starriver story. They test the image path (an image always goes to OCR, and always makes one `## Page 1`):
+
+- `she_sells_sea_shell.jpg`: a children's poster with a cartoon title and large handwriting-style text. OCR reads the poem well, but it misreads the decorative title ("Ssastotin" instead of "Seashells").
+- `safety_check_word.jpg`: a logo with only the word "SIMPLE". It makes a chunk with one word. `eval/ocr_questions.json` has one question for it ("what's the word for saftey check?", the typo is on purpose).
+
+Both are only samples. They are not about the company, and a real handbook would not have them. Delete their `.md` files from `data/` and run `index` again if you do not want them in the index.
+
+### Results on the travel guide
+
+These were measured before the two images were added (10 questions, 131 chunks, PDF read at 300 DPI). `eval/ocr_questions.json` now has 11 questions and the index has 133 chunks, so run `rag.py eval eval/ocr_questions.json` to get the current numbers.
 
 | Method          | hit@1 | hit@3 |
 | --------------- | ----- | ----- |
@@ -139,6 +212,20 @@ The 54 handbook questions give the same results as before, with the 4 new chunks
 - At 50 DPI, about half of the text is different, and the correct page is still in the top 3 for all 10 questions.
 - Retrieval breaks only at 36 DPI, when almost all of the text is lost. Then the reranker is **worse** than the vector search (6/10 against 9/10 at hit@3). A reranker that is better on clean text can be worse on garbage. With 10 questions, this is a hint, not a proof.
 - hit@k checks only that the right page is found. It does not check that the numbers on it are right. If OCR changes "NT$4,500" to "NT$4,800", retrieval still works, but the answer is wrong. When numbers matter, compare the answer with the scan.
+
+## Troubleshooting
+
+| Problem                                              | Cause and fix                                                                                                                         |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `ask` fails with an API key error                    | Set `GEMINI_API_KEY` in the same shell. `search` and `eval` do not need it.                                                           |
+| `ask` is slow, or the model is busy (HTTP 429 / 503) | The free tier is often busy. The code retries with `gemini-flash-lite-latest`. Wait a minute and try again.                           |
+| Search results look wrong after a model change       | The index has vectors from the old model. Run `index` again.                                                                          |
+| New or changed file in `data/` has no effect         | `index` is a separate step. Run it again. `ocr` does not update the index either.                                                     |
+| `Tesseract is not installed`                         | Run `brew install tesseract`. It is a program, not a Python package.                                                                  |
+| `Missing package (pytesseract...)`                   | Run `.venv/bin/pip install -r requirements.txt`.                                                                                      |
+| OCR text has strange letters or words                | Normal for OCR. Open `data/<name>.md` and fix it by hand, or read the scan with a higher `OCR_DPI`. Then run `index` again.           |
+| `eval` stops with a JSON error                       | Check the commas in your questions file. Every item needs a comma after it, except the last.                                          |
+| The first command is very slow                       | It downloads the model (about 1 GB). Later runs use the cache in `~/.cache/huggingface/hub/`.                                         |
 
 ## Not included on purpose (possible later additions)
 
